@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://cdn.jsdelivr.net/npm/phaser/dist/phaser.js"></script>
+</head>
+<body>
+
+<style>
+    body {
+      overflow: hidden;
+      padding: 0px;
+      margin: 0px;
+    }
+</style>
+
+<script>
+
+const _GRAVITY = 800;
+const _MAX_UPWARDS_VELOCITY = -300;
+const _UPWARDS_ACCELERATION = -450;
+const _TERMINAL_VELOCITY = 400;
+const _PIPE_SPACING_Y = 100;
+const _TREADMILL_SPEED = -125;
+
+const _CONFIG_WIDTH = 960;
+const _CONFIG_HEIGHT = 540;
+const _GROUND_Y = _CONFIG_HEIGHT;
+
+
+class FlappyBirdObject {
+  constructor(scene) {
+    this._sprite = scene.add.sprite(50, 100, 'bird');
+    this._velocity = 0;
+  }
+
+  Destroy() {
+    this._sprite.destroy();
+  }
+
+  Update(timeElapsed, keyboard) {
+    // Apply gravity and upward impulses
+    this._ApplyGravity(timeElapsed)
+    this._HandleInput(timeElapsed, keyboard)
+    this._velocity = Math.min(Math.max(this._velocity, _MAX_UPWARDS_VELOCITY), _TERMINAL_VELOCITY);
+
+    this._sprite.y += this._velocity * timeElapsed;
+
+    const v = new Phaser.Math.Vector2(-1 * _TREADMILL_SPEED * timeElapsed, 0);
+    v.add(new Phaser.Math.Vector2(0, this._velocity));
+    v.normalize();
+
+    const rad = Math.atan2(v.y, v.x);
+    const deg = (180.0 / Math.PI) * rad;
+
+    this._sprite.angle = deg * 0.75;
+  }
+
+  get Bounds() {
+    return this._sprite.getBounds();
+  }
+
+  _ApplyGravity(timeElapsed) {
+    this._velocity += _GRAVITY * timeElapsed;
+  }
+
+  _HandleInput(timeElapsed, keys) {
+    if (!Phaser.Input.Keyboard.JustDown(keys.up)) {
+      return;
+    }
+
+    this._velocity += _UPWARDS_ACCELERATION;
+  }
+}
+
+class PipePairObject {
+  constructor(scene, x) {
+    const height = _CONFIG_HEIGHT * (0.25 + 0.5 * Math.random());
+    this._sprite1 = scene.add.sprite(x, height + _PIPE_SPACING_Y * 0.5, 'pipe');
+    this._sprite1.displayOriginX = 0;
+    this._sprite1.displayOriginY = 0;
+
+    this._sprite2 = scene.add.sprite(x, height - _PIPE_SPACING_Y * 0.5, 'pipe');
+    this._sprite2.displayOriginX = 0;
+    this._sprite2.displayOriginY = 0;
+    this._sprite2.displayHeight = -1 * this._sprite2.height;
+  }
+
+  Destroy() {
+    this._sprite1.destroy();
+    this._sprite2.destroy();
+  }
+
+  Update(timeElapsed) {
+    this._sprite1.x += timeElapsed * _TREADMILL_SPEED;
+    this._sprite2.x += timeElapsed * _TREADMILL_SPEED;
+  }
+
+  Intersects(aabb) {
+    const b1 = this._sprite1.getBounds();
+    const b2 = this._sprite2.getBounds();
+    b2.y -= this._sprite2.height;
+    return (
+        Phaser.Geom.Intersects.RectangleToRectangle(b1, aabb) ||
+        Phaser.Geom.Intersects.RectangleToRectangle(b2, aabb));
+  }
+
+  Reset(x) {
+    const height = _CONFIG_HEIGHT * (0.25 + 0.5 * Math.random());
+    this._sprite1.x = x;
+    this._sprite1.y = height + _PIPE_SPACING_Y * 0.5;
+    this._sprite2.x = x;
+    this._sprite2.y = height - _PIPE_SPACING_Y * 0.5;
+  }
+
+  get X() {
+    return this._sprite1.x;
+  }
+
+  get Width() {
+    return this._sprite1.width;
+  }
+}
+
+class FlappyBirdGame {
+  constructor() {
+    this._game = this._CreateGame();
+    this._previousFrame = null;
+    this._bird = null;
+    this._gameOver = false;
+    this._score = 0;
+    this._scoreText = null;
+    this._gameOverText = null;
+    this._pipes = [];
+  }
+
+  _Destroy() {
+    this._bird.Destroy();
+    for (let p of this._pipes) {
+      p.Destroy();
+    }
+    this._scoreText.destroy();
+    if (this._gameOverText !== null) {
+      this._gameOverText.destroy();
+    }
+    this._bird = null;
+    this._pipes = [];
+    this._previousFrame = null;
+  }
+
+  _Init() {
+    for (let i = 0; i < 5; i+=1) {
+      this._pipes.push(new PipePairObject(this._scene, 500 + i * 250));
+    }
+
+    this._bird = new FlappyBirdObject(this._scene);
+    this._gameOver = false;
+    this._score = 0;
+  }
+
+  _CreateGame() {
+    const self = this;
+    const config = {
+        type: Phaser.AUTO,
+        scene: {
+            preload: function() { self._OnPreload(this); },
+            create: function() { self._OnCreate(this); },
+            update: function() { self._OnUpdate(this); },
+        },
+        scale: {
+          mode: Phaser.Scale.FIT,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+          width: _CONFIG_WIDTH,
+          height: _CONFIG_HEIGHT
+        }
+    };
+
+    return new Phaser.Game(config);
+  }
+
+  _OnPreload(scene) {
+    this._scene = scene;
+    this._scene.load.image('sky', 'assets/sky.png');
+    this._scene.load.image('bird', 'assets/bird.png');
+    this._scene.load.image('pipe', 'assets/pipe.png');
+  }
+
+  _OnCreate(scene) {
+    const s = this._scene.add.image(0, 0, 'sky');
+    s.displayOriginX = 0;
+    s.displayOriginY = 0;
+    s.displayWidth = _CONFIG_WIDTH;
+    s.displayHeight = _CONFIG_HEIGHT;
+
+    this._keys = {
+      up: this._scene.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.UP),
+      f: this._scene.input.keyboard.addKey('F'),
+      r: this._scene.input.keyboard.addKey('R'),
+    }
+
+    this._keys.f.on('down', function () {
+      if (this._scene.scale.isFullscreen) {
+        this._scene.scale.stopFullscreen();
+      } else {
+        this._scene.scale.startFullscreen();
+      }
+    }, this);
+
+    this._keys.r.on('down', function () {
+      this._Destroy();
+      this._Init();
+      this._DrawScore();
+    }, this);
+
+    this._Init();
+    this._DrawScore();
+  }
+
+  _OnUpdate(scene) {
+    if (this._gameOver) {
+      return;
+    }
+
+    const currentFrame = scene.time.now;
+    if (this._previousFrame == null) {
+      this._previousFrame = currentFrame;
+    }
+
+    const timeElapsedInS = (currentFrame - this._previousFrame) / 1000.0;
+
+    this._bird.Update(timeElapsedInS, this._keys);
+
+    this._UpdatePipes(timeElapsedInS);
+    this._CheckGameOver();
+
+    this._previousFrame = currentFrame;
+  }
+
+  _CheckGameOver() {
+    // Ground check
+    const birdAABB = this._bird.Bounds;
+    birdAABB.top += 10;
+    birdAABB.bottom -= 10;
+    birdAABB.left += 10;
+    birdAABB.right -= 10;
+
+    if (birdAABB.top >= _GROUND_Y) {
+      this._GameOver();
+      return;
+    }
+
+    for (const p of this._pipes) {
+      if (p.Intersects(birdAABB)) {
+        let a = p.Intersects(birdAABB);
+        this._GameOver();
+        return;
+      }
+    }
+  }
+
+  _UpdatePipes(timeElapsed) {
+    const oldPipeX = this._pipes[0].X + this._pipes[0].Width;
+
+    for (const p of this._pipes) {
+      p.Update(timeElapsed);
+    }
+
+    const newPipeX = this._pipes[0].X + this._pipes[0].Width;
+
+    if (oldPipeX > 50 && newPipeX <= 50) {
+      this._score += 1;
+      this._scoreText.text = "Score: " + this._score;
+    }
+
+    if ((this._pipes[0].X + this._pipes[0].Width) <= 0) {
+      const p = this._pipes.shift();
+      p.Reset(this._pipes[this._pipes.length - 1].X + 200.0);
+      this._pipes.push(p);
+    }
+  }
+
+  _GameOver() {
+    const text = "GAME OVER";
+    const style = {
+      font: "100px Roboto",
+      fill: "#FFFFFF",
+      align: "center",
+      fixedWidth: _CONFIG_WIDTH,
+      shadow: {
+        offsetX: 2,
+        offsetY: 2,
+        color: "#000",
+        blur: 2,
+        fill: true
+      }
+    };
+
+    this._gameOverText = this._scene.add.text(0, _CONFIG_HEIGHT * 0.25, text, style);
+    this._gameOver = true;
+  }
+
+  _DrawScore() {
+    const text = "Score: 0";
+    const style = {
+      font: "40px Roboto",
+      fill: "#FFFFFF",
+      align: "center",
+      shadow: {
+        offsetX: 2,
+        offsetY: 2,
+        color: "#000",
+        blur: 2,
+        fill: true
+      }
+    };
+
+    this._scoreText = this._scene.add.text(0, 0, text, style);
+  }
+}
+
+_GAME = new FlappyBirdGame()
+
+</script>
+
+</body>
+</html>
